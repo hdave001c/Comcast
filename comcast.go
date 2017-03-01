@@ -2,38 +2,51 @@ package main
 
 import (
 	"flag"
-	"github.com/tylertreat/comcast/throttler"
-	"log"
+	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/tylertreat/comcast/throttler"
 )
+
+const version = "1.0.0"
 
 func main() {
 	// TODO: Add support for other options like packet reordering, duplication, etc.
 	var (
 		device      = flag.String("device", "", "Interface (device) to use (defaults to eth0 where applicable)")
-		mode        = flag.String("mode", throttler.Start, "Start or stop packet controls")
+		stop        = flag.Bool("stop", false, "Stop packet controls")
 		latency     = flag.Int("latency", -1, "Latency to add in ms")
 		targetbw    = flag.Int("target-bw", -1, "Target bandwidth limit in kbit/s (slow-lane)")
 		defaultbw   = flag.Int("default-bw", -1, "Default bandwidth limit in kbit/s (fast-lane)")
-		packetLoss  = flag.String("packet-loss", "0", "Packet loss percentage (eg: 0.1%%)")
-		targetaddr  = flag.String("target-addr", "", "Target addresses, (eg: 10.0.0.1 or 10.0.0.0/24 or 10.0.0.1,192.168.0.0/24)")
-		targetport  = flag.String("target-port", "", "Target port(s) (eg: 80 or 1:65535 or 22,80,443,1000:1010)")
-		targetproto = flag.String("target-proto", "tcp,udp,icmp", "Target protocol TCP/UDP (eg: tcp or tcp,udp or icmp)")
+		packetLoss  = flag.String("packet-loss", "0", "Packet loss percentage (e.g. 0.1%)")
+		targetaddr  = flag.String("target-addr", "", "Target addresses, (e.g. 10.0.0.1 or 10.0.0.0/24 or 10.0.0.1,192.168.0.0/24 or 2001:db8:a::123)")
+		targetport  = flag.String("target-port", "", "Target port(s) (e.g. 80 or 1:65535 or 22,80,443,1000:1010)")
+		targetproto = flag.String("target-proto", "tcp,udp,icmp", "Target protocol TCP/UDP (e.g. tcp or tcp,udp or icmp)")
 		dryrun      = flag.Bool("dry-run", false, "Specifies whether or not to actually commit the rule changes")
-		//icmptype    = flag.String("icmp-type", "", "icmp message type (eg: reply or reply,request)") //TODO: Maybe later :3
+		//icmptype  = flag.String("icmp-type", "", "icmp message type (e.g. reply or reply,request)") //TODO: Maybe later :3
+		vers = flag.Bool("version", false, "Print Comcast's version")
 	)
 	flag.Parse()
 
+	if *vers {
+		fmt.Printf("Comcast version %s\n", version)
+		return
+	}
+
+	targetIPv4, targetIPv6 := parseAddrs(*targetaddr)
+
 	throttler.Run(&throttler.Config{
 		Device:           *device,
-		Mode:             *mode,
+		Stop:             *stop,
 		Latency:          *latency,
 		TargetBandwidth:  *targetbw,
 		DefaultBandwidth: *defaultbw,
 		PacketLoss:       parseLoss(*packetLoss),
-		TargetIps:        parseAddrs(*targetaddr),
+		TargetIps:        targetIPv4,
+		TargetIps6:       targetIPv6,
 		TargetPorts:      parsePorts(*targetport),
 		TargetProtos:     parseProtos(*targetproto),
 		DryRun:           *dryrun,
@@ -47,32 +60,43 @@ func parseLoss(loss string) float64 {
 	}
 	l, err := strconv.ParseFloat(val, 64)
 	if err != nil {
-		log.Fatalln("Incorrectly specified packet loss:", loss)
+		fmt.Println("Incorrectly specified packet loss:", loss)
+		os.Exit(1)
 	}
 	return l
 }
 
-func parseAddrs(addrs string) []string {
+func parseAddrs(addrs string) ([]string, []string) {
 	adrs := strings.Split(addrs, ",")
-	parsed := []string{}
+	parsedIPv4 := []string{}
+	parsedIPv6 := []string{}
 
 	if addrs != "" {
 		for _, adr := range adrs {
 			ip := net.ParseIP(adr)
 			if ip != nil {
-				parsed = append(parsed, adr)
-			} else { //Not a valid single IP, could it be a CIDR?
-				_, net, err := net.ParseCIDR(adr)
-				if err == nil {
-					parsed = append(parsed, net.String())
+				if ip.To4() != nil {
+					parsedIPv4 = append(parsedIPv4, adr)
 				} else {
-					log.Fatalln("Incorrectly specified target IP or CIDR:", adr)
+					parsedIPv6 = append(parsedIPv6, adr)
+				}
+			} else { //Not a valid single IP, could it be a CIDR?
+				parsedIP, net, err := net.ParseCIDR(adr)
+				if err == nil {
+					if parsedIP.To4() != nil {
+						parsedIPv4 = append(parsedIPv4, net.String())
+					} else {
+						parsedIPv6 = append(parsedIPv6, net.String())
+					}
+				} else {
+					fmt.Println("Incorrectly specified target IP or CIDR:", adr)
+					os.Exit(1)
 				}
 			}
 		}
 	}
 
-	return parsed
+	return parsedIPv4, parsedIPv6
 }
 
 func parsePorts(ports string) []string {
@@ -85,13 +109,15 @@ func parsePorts(ports string) []string {
 				if validRange(prt) {
 					parsed = append(parsed, prt)
 				} else {
-					log.Fatalln("Incorrectly specified port range:", prt)
+					fmt.Println("Incorrectly specified port range:", prt)
+					os.Exit(1)
 				}
 			} else { //Isn't a range, check if just a single port
 				if validPort(prt) {
 					parsed = append(parsed, prt)
 				} else {
-					log.Fatalln("Incorrectly specified port:", prt)
+					fmt.Println("Incorrectly specified port:", prt)
+					os.Exit(1)
 				}
 			}
 		}
@@ -151,7 +177,8 @@ func parseProtos(protos string) []string {
 				p == "icmp" {
 				parsed = append(parsed, p)
 			} else {
-				log.Fatalln("Incorrectly specified protocol:", p)
+				fmt.Println("Incorrectly specified protocol:", p)
+				os.Exit(1)
 			}
 		}
 	}

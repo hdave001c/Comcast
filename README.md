@@ -15,14 +15,15 @@ $ go get github.com/tylertreat/comcast
 
 ## Usage
 
-Currently (on Linux), Comcast supports several options: device, latency, target/default bandwidth, packet loss, protocol, and port number
+On Linux, Comcast supports several options: device, latency, target/default bandwidth, packet loss, protocol, and port number.
 
 ```
 $ comcast --device=eth0 --latency=250 --target-bw=1000 --default-bw=1000000 --packet-loss=10% --target-addr=8.8.8.8,10.0.0.0/24 --target-proto=tcp,udp,icmp --target-port=80,22,1000:2000
 ```
 
-On OSX/BSD (with `ipfw`), Comcast currently supports only: device, latency, target bandwidth, packet loss.
-This will cease to be the case in a future (soon<sup>TM</sup>) update.
+On OSX, Comcast will check for `pfctl` support (as of Yosemite), which supports the same options as above. If `pfctl` is not available, it will use `ipfw` instead, which supports device, latency, target bandwidth, and packet-loss options.
+
+On BSD (with `ipfw`), Comcast currently supports only: device, latency, target bandwidth, and packet loss. 
 
 ```
 $ comcast --device=eth0 --latency=250 --target-bw=1000 --packet-loss=10%
@@ -31,7 +32,7 @@ $ comcast --device=eth0 --latency=250 --target-bw=1000 --packet-loss=10%
 This will add 250ms of latency, limit bandwidth to 1Mbps, and drop 10% of packets to the targetted (on Linux) destination addresses using the specified protocols on the specified port numbers (slow lane). The default bandwidth specified will apply to all egress traffic (fast lane). To turn this off, run the following:
 
 ```
-$ comcast --mode stop
+$ comcast --stop
 ```
 
 ## I don't trust you, this code sucks, I hate Go, etc.
